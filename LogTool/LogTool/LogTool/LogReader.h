@@ -28,12 +28,9 @@ private:
     DWORD bufferSize;   // размер буфера
     DWORD bufferPos;    // позиция чтения в буфере
     DWORD bufferEnd;    // считано байт в буфере
-    DWORD questionMark;
-
 
     void releaseFilter();
     bool workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart);
-    bool isMatched();
     void fillInputBuffer(int lineStart, char* _buf, const int _bufsize, bool fileLastPart);
 };
  

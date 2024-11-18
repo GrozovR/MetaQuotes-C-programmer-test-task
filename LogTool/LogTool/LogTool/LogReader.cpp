@@ -237,15 +237,19 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 	return false;
 }
 
-bool CLogReader::isMatched()
-{
-
-
-	return false;
-}
-
 void CLogReader::fillInputBuffer(int lineStart, char* _buf, const int _bufsize, bool fileLastPart)
 {
+	int currentLength = strnlen_s(_buf, _bufsize);
+	int freeSpace = _bufsize - currentLength - 1;
+
+	if (freeSpace > 0) {
+		int lineLenght = bufferPos - lineStart;
+		int toCopy = (freeSpace < lineLenght) ? freeSpace : lineLenght;
+		memcpy_s(&_buf[currentLength], freeSpace, &buffer[lineStart], toCopy);
+		// окончание строки
+		_buf[currentLength + toCopy] = NULL;
+	}
+	/*
 	int bufferSize = _bufsize - 1;
 	int bufferFreeSize = bufferSize - strnlen_s(_buf, _bufsize);
 
@@ -258,4 +262,5 @@ void CLogReader::fillInputBuffer(int lineStart, char* _buf, const int _bufsize, 
 		// окончание строки
 		_buf[inputBufoffset + toCopy] = NULL;
 	}
+	*/
 }
