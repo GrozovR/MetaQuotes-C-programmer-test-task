@@ -1,4 +1,5 @@
 ﻿#include "LogReader.h"
+#include <stdio.h>
 
 static const int ErrorCode = 1;
 

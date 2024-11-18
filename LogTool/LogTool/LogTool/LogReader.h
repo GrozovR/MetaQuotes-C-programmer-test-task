@@ -1,11 +1,6 @@
 #pragma once
 
-#include <stdio.h>
-
 #include <windows.h>
-#include <cstdio>
-#include <cstring>
-
 
 class CLogReader final
 {
@@ -22,17 +17,19 @@ public:
 
 private:
     HANDLE fileHandle;  // хэндл к файлу
-    DWORD fileSize;     // размер файла
-    DWORD fileBytesReaded; // общее кол-во прочитанных байт
+    LARGE_INTEGER fileSize;     // размер файла
+    LARGE_INTEGER fileBytesReaded; // общее кол-во прочитанных байт
 
     char* filter;       // строка фильтра
-    int filterPos;      // позиция фильтра при проходе по строке
-    int filterAsteriskPos; // позиция звездочки в фильтре
+    size_t filterPos;      // позиция фильтра при проходе по строке
+    size_t filterAsteriskPos; // позиция звездочки в фильтре
 
     char* buffer;       // буфер для чтения из файла
     DWORD bufferSize;   // размер буфера
     DWORD bufferPos;    // позиция чтения в буфере
     DWORD bufferEnd;    // считано байт в буфере
+    DWORD questionMark;
+
 
     void releaseFilter();
     bool workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart);

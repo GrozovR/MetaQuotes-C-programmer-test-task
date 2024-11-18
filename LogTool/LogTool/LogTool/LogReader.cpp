@@ -1,11 +1,15 @@
 #include "LogReader.h"
+#include <stdio.h>
 
-constexpr int NotFound = -1;
+constexpr size_t NotFound = MAXSIZE_T;
 
 CLogReader::CLogReader()
-	: fileHandle(INVALID_HANDLE_VALUE), filter(nullptr), buffer(nullptr),
+	: fileHandle(INVALID_HANDLE_VALUE),
+	filter(nullptr), filterPos(0), filterAsteriskPos(NotFound), buffer(nullptr),
 	bufferSize(0), bufferPos(0), bufferEnd(0)
 {
+	fileSize.QuadPart = 0;
+	fileBytesReaded.QuadPart = 0;
 }
 
 CLogReader::~CLogReader()
@@ -29,12 +33,11 @@ bool CLogReader::Open(const char* _fileName)
 	if (buffer == nullptr)
 	{
 		bufferSize = 64 * 1024; // 64 Кб
-		fileSize = GetFileSize(fileHandle, NULL);
-		if (fileSize == 0) {
+		if (!GetFileSizeEx(fileHandle, &fileSize)) {
 			return false;
 		}
-		if (bufferSize > fileSize) {
-			bufferSize = fileSize + 1;
+		if (bufferSize > fileSize.QuadPart) {
+			bufferSize = fileSize.QuadPart + 1;
 		}
 
 		buffer = (char*) malloc(bufferSize * sizeof(char));
@@ -56,8 +59,8 @@ void CLogReader::Close()
 	{
 		CloseHandle(fileHandle);
 		fileHandle = INVALID_HANDLE_VALUE;
-		fileSize = 0;
-		fileBytesReaded = 0;
+		fileSize.QuadPart = 0;
+		fileBytesReaded.QuadPart = 0;
 	}
 	if (buffer != nullptr)
 	{
@@ -102,7 +105,8 @@ bool CLogReader::SetFilter(const char* _filter)
 
 bool CLogReader::GetNextLine(char* _buf, const int _bufsize)
 {
-	if (fileHandle == INVALID_HANDLE_VALUE || filter == nullptr || _buf == nullptr || _bufsize <= 0)
+	if (_buf == nullptr || _bufsize <= 0 ||
+		fileHandle == INVALID_HANDLE_VALUE || buffer == nullptr || filter == nullptr )
 	{
 		return false; // Проверка корректности входных данных
 	}
@@ -117,14 +121,15 @@ bool CLogReader::GetNextLine(char* _buf, const int _bufsize)
 				printf_s("Error ReadFile");
 				return false;
 			}
-			fileBytesReaded += bufferEnd;
+			fileBytesReaded.QuadPart += bufferEnd;
+			bufferPos = 0;
 		}
 		// конец файла
 		if (bufferEnd == 0) {
 			return false;
 		}
 		// Обрабатываем прочитанную часть
-		if (workWithReadedPart(_buf, _bufsize, fileBytesReaded == fileSize))
+		if (workWithReadedPart(_buf, _bufsize, fileBytesReaded.QuadPart == fileSize.QuadPart))
 		{
 			// Нашли строку и в этот момент заполнен входной буффер,
 			// сохранили позицию в буфере чтения, сброшена позиция фильтра
@@ -200,8 +205,8 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 				// строка уже не матчится, просто ищем конец строки
 				stringNotMatched = true;
 			}
-			else if (filterChar != NULL && filterAsteriskPos != NotFound) {
-				// откатываемся к предыдущей звездочке
+			else if (filterAsteriskPos != NotFound) {
+				// откатываемся к предыдущей звездочке в фильтре
 				filterPos = filterAsteriskPos + 1;
 				if (bufferChar == filter[filterPos] || filterChar == '?') {
 					filterPos++;
