@@ -20,25 +20,22 @@ public:
     bool GetNextLine(char* buf, const int bufsize); // запрос очередной найденной строки
     // buf - буфер, bufsize - максимальная длина, false - конец файла или ошибка
 
-    void WorkInFile();
-
 private:
     HANDLE fileHandle;  // хэндл к файлу
+    DWORD fileSize;     // размер файла
+    DWORD fileBytesReaded; // общее кол-во прочитанных байт
+
     char* filter;       // строка фильтра
-    DWORD filterPos;    // позиция фильтра при проходе по строке
+    int filterPos;      // позиция фильтра при проходе по строке
+    int filterAsteriskPos; // позиция звездочки в фильтре
+
     char* buffer;       // буфер для чтения из файла
     DWORD bufferSize;   // размер буфера
     DWORD bufferPos;    // позиция чтения в буфере
     DWORD bufferEnd;    // считано байт в буфере
 
-    bool workWithReadedPart(char* _buf, const int _bufsize);
-    void fillInputBuffer(int lineStart, char* _buf, const int _bufsize);
-    /*bool isMatched();
-
-
-    size_t workWithLine(char* buf, const int bufsize, bool isEndLine = false);
-    void getNextLine(char* buf, int bufsize);
-    bool isMatch(char* buf, char* filter);
-    */
+    void releaseFilter();
+    bool workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart);
+    void fillInputBuffer(int lineStart, char* _buf, const int _bufsize, bool fileLastPart);
 };
  

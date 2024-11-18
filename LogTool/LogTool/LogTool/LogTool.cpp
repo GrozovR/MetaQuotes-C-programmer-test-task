@@ -22,12 +22,12 @@ int main( int argc, char* argv[] )
     }
 
     const int bufsize = 4096;
-    char* buf = new char[bufsize];
+    char* buf = (char*) malloc(bufsize * sizeof(char));
 
     while (logReader.GetNextLine(buf, bufsize)) {
         printf_s("%s\n", buf);
     }
-
+    free(buf);
     logReader.Close();
     return 0;
 }

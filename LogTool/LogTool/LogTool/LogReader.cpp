@@ -1,13 +1,6 @@
 #include "LogReader.h"
 
-#include <new>
-#include <iostream>
-
-// TODO: 
-// new на маллоки
-// GetnextLine - investigate optimal buffer size
-// d
-// f
+constexpr int NotFound = -1;
 
 CLogReader::CLogReader()
 	: fileHandle(INVALID_HANDLE_VALUE), filter(nullptr), buffer(nullptr),
@@ -18,25 +11,25 @@ CLogReader::CLogReader()
 CLogReader::~CLogReader()
 {
 	Close();
+	releaseFilter();
 }
 
 bool CLogReader::Open(const char* _fileName)
 {
 	Close();
 
-	// TODO: check fielname size по MAX_PATH
-
-	fileHandle = CreateFileA(_fileName, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	fileHandle = CreateFileA(_fileName, GENERIC_READ, FILE_SHARE_READ,
+		nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (fileHandle == INVALID_HANDLE_VALUE)
 	{
 		return false;
 	}
 
-	// инициализируем буфер для чтения, если еще не
+	// инициализируем буфер для чтения
 	if (buffer == nullptr)
 	{
 		bufferSize = 64 * 1024; // 64 Кб
-		DWORD fileSize = GetFileSize(fileHandle, NULL);
+		fileSize = GetFileSize(fileHandle, NULL);
 		if (fileSize == 0) {
 			return false;
 		}
@@ -44,17 +37,16 @@ bool CLogReader::Open(const char* _fileName)
 			bufferSize = fileSize + 1;
 		}
 
-		buffer = new (std::nothrow) char[bufferSize];
+		buffer = (char*) malloc(bufferSize * sizeof(char));
 		if (buffer == nullptr)
 		{
-			std::cout << "Error new memory WorkWithFile()" << std::endl;
+			printf_s("Error new memory for read buffer");
 			return false;
 		}
 		ZeroMemory(buffer, bufferSize);
 		bufferPos = 0;
 		bufferEnd = 0;
 	}
-
 	return true;
 }
 
@@ -64,34 +56,32 @@ void CLogReader::Close()
 	{
 		CloseHandle(fileHandle);
 		fileHandle = INVALID_HANDLE_VALUE;
+		fileSize = 0;
+		fileBytesReaded = 0;
 	}
 	if (buffer != nullptr)
 	{
-		delete[] buffer;
+		free(buffer);
 		buffer = nullptr;
-	}
-	if (filter != nullptr)
-	{
-		delete[] filter;
-		filter = nullptr;
 	}
 }
 
 bool CLogReader::SetFilter(const char* _filter)
 {
 	if (_filter == nullptr)
-	{
 		return false;
-	}
-	size_t length = strlen(_filter);
-	if (length == 0) {
-		return false;
-	}
-	size_t filterSize = length + 1;
 
-	filter = new (std::nothrow) char[filterSize];
+	size_t length = strlen(_filter);
+	if (length == 0)
+		return false;
+
+	releaseFilter();
+
+	size_t filterSize = length + 1;
+	filter = (char*) malloc(filterSize * sizeof(char));
 	if (filter == nullptr)
 	{
+		printf_s("Error new memory for set filter");
 		return false;
 	}
 
@@ -121,222 +111,136 @@ bool CLogReader::GetNextLine(char* _buf, const int _bufsize)
 
 	while (true) {
 		// Текущий буфер обработан, считываем следующую часть файла
-		if ( bufferPos == bufferEnd
-			&& !ReadFile(fileHandle, buffer, bufferSize, &bufferEnd, NULL))
+		if (bufferPos == bufferEnd)
 		{
-			std::cout << "Error ReadFile code: " << GetLastError() << std::endl;
-			return false;
+			if (!ReadFile(fileHandle, buffer, bufferSize, &bufferEnd, NULL)){
+				printf_s("Error ReadFile");
+				return false;
+			}
+			fileBytesReaded += bufferEnd;
 		}
 		// конец файла
 		if (bufferEnd == 0) {
 			return false;
 		}
 		// Обрабатываем прочитанную часть
-		if (workWithReadedPart(_buf, _bufsize))
+		if (workWithReadedPart(_buf, _bufsize, fileBytesReaded == fileSize))
 		{
-			// заполнен входной буффер
-			// сохранили позицию в буфере
-			// сброшена позиция фильтра
+			// Нашли строку и в этот момент заполнен входной буффер,
+			// сохранили позицию в буфере чтения, сброшена позиция фильтра
 			filterPos = 0;
+			filterAsteriskPos = NotFound;
 			return true;
-		} else {
-			// Дошли до конца буффера, но не нашли подходящей строки
 		}
 	}
 	return false;
 }
 
+void CLogReader::releaseFilter()
+{
+	if (filter != nullptr) {
+		free(filter);
+		filterPos = 0;
+		filterAsteriskPos = NotFound;
+	}
+}
+
 // Работа с буфером
-bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize)
+bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart)
 {
 	static bool isFilterMatched = false;
 	int lineStartPos = bufferPos;
-
-	int asterixPos = -1;
 	bool stringNotMatched = false;
 
 	for (; bufferPos < bufferEnd; bufferPos++) {
-		char bufferChar = buffer[bufferPos];
+
 		char filterChar = filter[filterPos];
+		// Запоминаем позицию звездочки в фильтре
 		if (filterChar == '*') {
-			asterixPos = filterPos;
+			filterAsteriskPos = filterPos;
 			filterPos++;
 			filterChar = filter[filterPos];
 		}
 
-		// TODO: излишнее ? // Тут filterChar не должен быть звездочкой, только символом
-		if (filterChar != '?' && bufferChar != filterChar && asterixPos == -1) {
-			stringNotMatched = true; // больше проверок не нужно, просто найдем конец строки
+		char bufferChar = buffer[bufferPos];
+		// Пропускаем возврат корретки перед переносом строки
+		if (bufferChar == '\r' && bufferPos + 1 < bufferEnd && buffer[bufferPos + 1] == '\n') {
+			bufferPos++;
+			bufferChar = buffer[bufferPos];
 		}
 
-		if (filterChar == NULL && bufferChar == NULL)
-			return true; // Конец файла + совпадение по фильтру ( чет пока не поймал
-
-		if (bufferChar == '\n' || ( bufferPos + 1 == bufferEnd ) ) {
-
-			// тут нужно еще отбрасывать \r, для строк у которых нет * на конце
-
-			if ((filterChar == NULL) || (filterChar == '*' && filter[filterPos + 1] == NULL)) {
-				fillInputBuffer(lineStartPos,_buf, _bufsize);
+		if (bufferChar == '\n' ) { // конец строки
+			// Определим, можно ли пройти фильтр до конца, если он не закончен
+			if (filterChar != NULL) {
+				if (filterChar == '*')
+					filterChar = filter[filterPos+1];
+			}
+			// Конец строки + конец фильтра - это совпадение
+			if (filterChar == NULL) {
+				fillInputBuffer(lineStartPos,_buf, _bufsize, fileLastPart);
 				bufferPos++;	
 				return true;
 			}
 			else {
-				_buf[0] = NULL;// сбрасываем входной буфер - Обнуляем первый символ, чтобы запись пошла с начала
+				// сбрасываем входной буфер - Обнуляем первый символ, чтобы запись пошла с начала
+				_buf[0] = NULL;
 				lineStartPos = bufferPos + 1;
 			}
 			filterPos = 0;
-			asterixPos = -1;
+			filterAsteriskPos = NotFound;
+			stringNotMatched = false;
 		}
-		else {
-			if (stringNotMatched) {
-				// строка уже не матчится, просто ищем конец
-				continue;
-			}
+		else if( !stringNotMatched ) {
 			if (bufferChar == filterChar || filterChar == '?') {
+				// совпадение
 				filterPos++;
 			}
-			else if (asterixPos == -1) {
-				// символ не сходится, предыдущей звездочки нет
+			else if (filterAsteriskPos == NotFound) {
+				// символ не совпадает, предыдущей звездочки нет
+				// строка уже не матчится, просто ищем конец строки
 				stringNotMatched = true;
 			}
-			else if (asterixPos != -1) {
-				filterPos = asterixPos + 1;
+			else if (filterChar != NULL && filterAsteriskPos != NotFound) {
+				// откатываемся к предыдущей звездочке
+				filterPos = filterAsteriskPos + 1;
 				if (bufferChar == filter[filterPos] || filterChar == '?') {
 					filterPos++;
 				}
 			}
 		}
 	}
-	// прошли прочитанный буффер до конца, прихраним строку, если есть куда
-	fillInputBuffer(lineStartPos, _buf, _bufsize);
+
+	// Обработаем конец файла
+	if (fileLastPart && bufferPos == bufferEnd && !stringNotMatched) {
+		char filterChar = filter[filterPos];
+		// Определим, можно ли пройти фильтр до конца, если он не закончен
+		if (filterChar != NULL) {
+			if (filterChar == '*')
+				filterChar = filter[filterPos + 1];
+		}
+		// Конец строки + конец фильтра - это совпадение
+		if (filterChar == NULL) {
+			fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
+			return true;
+		}
+	}
+	// прошли прочитанный буффер до конца, прихраним кусок строки во входной буффер
+	fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
 	return false;
 }
 
-void CLogReader::fillInputBuffer(int lineStart, char* _buf, const int _bufsize)
+void CLogReader::fillInputBuffer(int lineStart, char* _buf, const int _bufsize, bool fileLastPart)
 {
-	// TODO: проверить
-	int inputBufferFreeSize = _bufsize - strnlen_s(_buf, _bufsize);// -1;
+	int bufferSize = _bufsize - 1;
+	int bufferFreeSize = bufferSize - strnlen_s(_buf, _bufsize);
 
-	if (inputBufferFreeSize > 1) {
-		int inputBufoffset = _bufsize - inputBufferFreeSize;
+	if (bufferFreeSize > 0) {
+		int inputBufoffset = bufferSize - bufferFreeSize;
 		int lineLenght = bufferPos - lineStart;
 
-		int toCopy = inputBufferFreeSize < lineLenght
-			? inputBufferFreeSize : lineLenght;	
-		memcpy_s(&_buf[inputBufoffset], inputBufferFreeSize, &buffer[lineStart], toCopy);
+		int toCopy = bufferFreeSize < lineLenght ? bufferFreeSize : lineLenght;
+		memcpy_s(&_buf[inputBufoffset], bufferFreeSize, &buffer[lineStart], toCopy);
 		// окончание строки
 		_buf[inputBufoffset + toCopy] = NULL;
 	}
 }
-
-
-/*
-
-bool CLogReader::isMatched()
-{
-	if ((filter[filterPos] == '\0') && (buffer[bufferPos] == '\0'))
-		return true;
-
-	if (filter[filterPos] == '\0') // не понимаю - типа конец фильтра, но не конец строки???
-		return false;
-
-	if (filter[filterPos] == '*')
-	{
-		if (filter[filterPos] == '\0')
-			return true; // звезда в конце фильтра - нам без разницы, как заканчивается buf
-
-		for (size_t i = 0, size = strlen(buf); i <= size; i++)
-			if ((*(buf + i) == *(filter + 1)) || (*(filter + 1) == '?')) {
-				// наткнулись на нужный символ, рекурсивно??? проверяем
-				if (isMatch(buf + i + 1, filter + 2))
-					return true;
-			}
-	}
-	else
-	{
-		if (buffer[bufferPos] == '\0')
-			return false; // как будто нужно проверять 
-
-		if ((filter[filterPos] == '?') || (filter[filterPos] == buffer[bufferPos]))
-			if (isMatch(buf + 1, filter + 1))
-				return true;
-		// как будто супер неоптимально, можно выйти раньше?
-	}
-	return false;
-}
-
-size_t CLogReader::workWithLine(char* buf, const int bufsize, bool isEndLine)
-{
-	size_t pos(0);
-
-	for (int i = 0; i < bufsize; ++i)
-	{
-		if (buf[i] == '\n')
-		{
-			getNextLine(&buf[pos], i - pos);
-			pos = i + 1;
-		}
-	}
-
-	if (isEndLine)
-		getNextLine(&buf[pos], bufsize - pos);
-
-	return pos;
-}
-
-void CLogReader::getNextLine(char* buf, int bufsize)
-{
-	//А нужно ли нам подобное условие?
-	if (bufsize > 1 && buf[bufsize - 1] == '\r')
-		bufsize = bufsize - 1;
-
-	char* StrReg = new(std::nothrow) char[bufsize + 1];
-	if (StrReg)
-	{
-		ZeroMemory(StrReg, bufsize + 1);
-		memcpy_s(StrReg, bufsize + 1, buf, bufsize);
-
-		if (isMatch(StrReg, const_cast<char*>(filter)))
-			//printStr(StrReg);
-
-		delete[] StrReg;
-		StrReg = nullptr;
-	}
-	else
-		std::cout << "Error new memory GetNextLine()" << std::endl;
-}
-
-bool CLogReader::isMatch(char* buf, char* filter)
-{
-	if ((*filter == '\0') && (*buf == '\0'))
-		return true;
-
-	if (*filter == '\0') // не понимаю
-		return false;
-
-	if (*filter == '*')
-	{
-		if (*(filter + 1) == '\0')
-			return true; // звезда в конце фильтра - нам без разницы, как заканчивается buf
-
-		for (size_t i = 0, size = strlen(buf); i <= size; i++)
-			if ((*(buf + i) == *(filter + 1)) || (*(filter + 1) == '?')) {
-				// наткнулись на нужный символ, рекурсивно??? проверяем
-				if (isMatch(buf + i + 1, filter + 2))
-					return true;
-			}
-	}
-	else
-	{
-		if (*buf == '\0')
-			return false;
-
-		if ((*filter == '?') || (*filter == *buf))
-			if (isMatch(buf + 1, filter + 1))
-				return true;
-		// как будто супер неоптимально, можно выйти раньше?
-	}
-	return false;
-}
-*/
