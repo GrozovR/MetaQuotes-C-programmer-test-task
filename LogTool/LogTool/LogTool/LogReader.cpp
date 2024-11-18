@@ -155,7 +155,8 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 {
 	static bool isFilterMatched = false;
 	int lineStartPos = bufferPos;
-	bool stringNotMatched = false;
+	bool stringNotMatched = false; // TODO: если кончится буфер, то скинется
+	DWORD bufPosTmp = bufferPos;
 
 	for (; bufferPos < bufferEnd; bufferPos++) {
 
@@ -165,6 +166,7 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 			filterAsteriskPos = filterPos;
 			filterPos++;
 			filterChar = filter[filterPos];
+			bufPosTmp = bufferPos;
 		}
 
 		char bufferChar = buffer[bufferPos];
@@ -208,6 +210,7 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 			else if (filterAsteriskPos != NotFound) {
 				// откатываемся к предыдущей звездочке в фильтре
 				filterPos = filterAsteriskPos + 1;
+				bufferPos = bufPosTmp++;
 				if (bufferChar == filter[filterPos] || filterChar == '?') {
 					filterPos++;
 				}
@@ -231,6 +234,13 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 	}
 	// прошли прочитанный буффер до конца, прихраним кусок строки во входной буффер
 	fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
+	return false;
+}
+
+bool CLogReader::isMatched()
+{
+
+
 	return false;
 }
 
