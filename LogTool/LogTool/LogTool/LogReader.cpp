@@ -153,10 +153,18 @@ void CLogReader::releaseFilter()
 // Работа с буфером
 bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart)
 {
-	static bool isFilterMatched = false;
 	int lineStartPos = bufferPos;
 	bool stringNotMatched = false; // TODO: если кончится буфер, то скинется
-	DWORD bufPosTmp = bufferPos;
+	DWORD bufPosTmp = bufferPos; // Куда хотим откатиться, но если кончится буффер, тоже шляпа получится
+
+	auto isFilterEnd = [&]() -> bool {
+		// Определим, можно ли пройти фильтр до конца, если он не закончен
+		char filterChar = filter[filterPos];
+		if (filterChar == '*') {
+			filterChar = filter[filterPos + 1];
+		}
+		return filterChar == NULL;
+	};
 
 	for (; bufferPos < bufferEnd; bufferPos++) {
 
@@ -177,13 +185,8 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 		}
 
 		if (bufferChar == '\n' ) { // конец строки
-			// Определим, можно ли пройти фильтр до конца, если он не закончен
-			if (filterChar != NULL) {
-				if (filterChar == '*')
-					filterChar = filter[filterPos+1];
-			}
 			// Конец строки + конец фильтра - это совпадение
-			if (filterChar == NULL) {
+			if (isFilterEnd()) {
 				fillInputBuffer(lineStartPos,_buf, _bufsize, fileLastPart);
 				bufferPos++;	
 				return true;
@@ -196,8 +199,7 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 			filterPos = 0;
 			filterAsteriskPos = NotFound;
 			stringNotMatched = false;
-		}
-		else if( !stringNotMatched ) {
+		} else if( !stringNotMatched ) {
 			if (bufferChar == filterChar || filterChar == '?') {
 				// совпадение
 				filterPos++;
@@ -219,18 +221,11 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 	}
 
 	// Обработаем конец файла
-	if (fileLastPart && bufferPos == bufferEnd && !stringNotMatched) {
-		char filterChar = filter[filterPos];
+	if (fileLastPart && bufferPos == bufferEnd && !stringNotMatched && isFilterEnd()) {
 		// Определим, можно ли пройти фильтр до конца, если он не закончен
-		if (filterChar != NULL) {
-			if (filterChar == '*')
-				filterChar = filter[filterPos + 1];
-		}
 		// Конец строки + конец фильтра - это совпадение
-		if (filterChar == NULL) {
-			fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
-			return true;
-		}
+		fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
+		return true;
 	}
 	// прошли прочитанный буффер до конца, прихраним кусок строки во входной буффер
 	fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
@@ -249,18 +244,4 @@ void CLogReader::fillInputBuffer(int lineStart, char* _buf, const int _bufsize, 
 		// окончание строки
 		_buf[currentLength + toCopy] = NULL;
 	}
-	/*
-	int bufferSize = _bufsize - 1;
-	int bufferFreeSize = bufferSize - strnlen_s(_buf, _bufsize);
-
-	if (bufferFreeSize > 0) {
-		int inputBufoffset = bufferSize - bufferFreeSize;
-		int lineLenght = bufferPos - lineStart;
-
-		int toCopy = bufferFreeSize < lineLenght ? bufferFreeSize : lineLenght;
-		memcpy_s(&_buf[inputBufoffset], bufferFreeSize, &buffer[lineStart], toCopy);
-		// окончание строки
-		_buf[inputBufoffset + toCopy] = NULL;
-	}
-	*/
 }
