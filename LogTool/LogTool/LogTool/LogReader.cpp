@@ -1,11 +1,11 @@
 #include "LogReader.h"
 #include <stdio.h>
 
-constexpr size_t NotFound = MAXSIZE_T;
+constexpr size_t NotFound = -1;
 
 CLogReader::CLogReader()
 	: fileHandle(INVALID_HANDLE_VALUE),
-	filter(nullptr), filterPos(0), filterAsteriskPos(NotFound), buffer(nullptr),
+	filter(nullptr), buffer(nullptr),
 	bufferSize(0), bufferPos(0), bufferEnd(0)
 {
 	fileSize.QuadPart = 0;
@@ -32,7 +32,7 @@ bool CLogReader::Open(const char* _fileName)
 	// инициализируем буфер для чтения
 	if (buffer == nullptr)
 	{
-		bufferSize = 64 * 1024; // 64 Кб
+		bufferSize = 64 * 1024;
 		if (!GetFileSizeEx(fileHandle, &fileSize)) {
 			return false;
 		}
@@ -40,7 +40,7 @@ bool CLogReader::Open(const char* _fileName)
 			bufferSize = fileSize.QuadPart + 1;
 		}
 
-		buffer = (char*) malloc(bufferSize * sizeof(char));
+		buffer = static_cast<char*>( malloc(bufferSize * sizeof(char)) );
 		if (buffer == nullptr)
 		{
 			printf_s("Error new memory for read buffer");
@@ -66,6 +66,9 @@ void CLogReader::Close()
 	{
 		free(buffer);
 		buffer = nullptr;
+		bufferSize = 0;
+		bufferPos = 0;
+		bufferEnd = 0;
 	}
 }
 
@@ -111,8 +114,6 @@ bool CLogReader::GetNextLine(char* _buf, const int _bufsize)
 		return false; // Проверка корректности входных данных
 	}
 
-	ZeroMemory(_buf, _bufsize);
-
 	while (true) {
 		// Текущий буфер обработан, считываем следующую часть файла
 		if (bufferPos == bufferEnd)
@@ -131,11 +132,7 @@ bool CLogReader::GetNextLine(char* _buf, const int _bufsize)
 		// Обрабатываем прочитанную часть
 		if (workWithReadedPart(_buf, _bufsize, fileBytesReaded.QuadPart == fileSize.QuadPart))
 		{
-			// Нашли строку и в этот момент заполнен входной буффер,
-			// сохранили позицию в буфере чтения, сброшена позиция фильтра
-			filterPos = 0;
-			filterAsteriskPos = NotFound;
-			return true;
+			return true; // Нашли строку, соответствующую фильтру
 		}
 	}
 	return false;
@@ -145,17 +142,19 @@ void CLogReader::releaseFilter()
 {
 	if (filter != nullptr) {
 		free(filter);
-		filterPos = 0;
-		filterAsteriskPos = NotFound;
+		filter = nullptr;
 	}
 }
 
 // Работа с буфером
 bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart)
 {
-	int lineStartPos = bufferPos;
-	bool stringNotMatched = false; // TODO: если кончится буфер, то скинется
-	DWORD bufPosTmp = bufferPos; // Куда хотим откатиться, но если кончится буффер, тоже шляпа получится
+	DWORD lineStartPos = bufferPos;	 // Начало строки в буфере
+	_int64 filterPos = 0;				 // позиция фильтра при проходе по строке
+	_int64 filterAsteriskPos = NotFound; // позиция звездочки в фильтре
+	DWORD bufNextSymbolPos = bufferPos; // Следующая позиция буфера
+
+	bool stringNotMatched = false;
 
 	auto isFilterEnd = [&]() -> bool {
 		// Определим, можно ли пройти фильтр до конца, если он не закончен
@@ -172,9 +171,8 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 		// Запоминаем позицию звездочки в фильтре
 		if (filterChar == '*') {
 			filterAsteriskPos = filterPos;
-			filterPos++;
-			filterChar = filter[filterPos];
-			bufPosTmp = bufferPos;
+			filterChar = filter[++filterPos];
+			bufNextSymbolPos = bufferPos;
 		}
 
 		char bufferChar = buffer[bufferPos];
@@ -186,19 +184,18 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 
 		if (bufferChar == '\n' ) { // конец строки
 			// Конец строки + конец фильтра - это совпадение
-			if (isFilterEnd()) {
-				fillInputBuffer(lineStartPos,_buf, _bufsize, fileLastPart);
+			if (!stringNotMatched && isFilterEnd()) {
+				fillInputBuffer(lineStartPos,_buf, _bufsize);
 				bufferPos++;	
 				return true;
 			}
-			else {
-				// сбрасываем входной буфер - Обнуляем первый символ, чтобы запись пошла с начала
-				_buf[0] = NULL;
-				lineStartPos = bufferPos + 1;
-			}
+			// сбрасываем входной буфер - Обнуляем первый символ, чтобы запись пошла с начала
+			_buf[0] = NULL;
+			lineStartPos = bufferPos + 1;
 			filterPos = 0;
 			filterAsteriskPos = NotFound;
 			stringNotMatched = false;
+
 		} else if( !stringNotMatched ) {
 			if (bufferChar == filterChar || filterChar == '?') {
 				// совпадение
@@ -210,38 +207,36 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 				stringNotMatched = true;
 			}
 			else if (filterAsteriskPos != NotFound) {
-				// откатываемся к предыдущей звездочке в фильтре
+				// откатываемся к предыдущей звездочке в фильтре и позиции в буфере
 				filterPos = filterAsteriskPos + 1;
-				bufferPos = bufPosTmp++;
-				if (bufferChar == filter[filterPos] || filterChar == '?') {
-					filterPos++;
-				}
+				bufferPos = bufNextSymbolPos++;
 			}
 		}
 	}
 
-	// Обработаем конец файла
 	if (fileLastPart && bufferPos == bufferEnd && !stringNotMatched && isFilterEnd()) {
-		// Определим, можно ли пройти фильтр до конца, если он не закончен
-		// Конец строки + конец фильтра - это совпадение
-		fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
+		// Последняя строка файла
+		fillInputBuffer(lineStartPos, _buf, _bufsize);
 		return true;
 	}
-	// прошли прочитанный буффер до конца, прихраним кусок строки во входной буффер
-	fillInputBuffer(lineStartPos, _buf, _bufsize, fileLastPart);
+	if (!fileLastPart && buffer[bufferPos - 1] != '\n') {
+		if (lineStartPos == 0) {
+			bufferEnd = 0;
+			printf_s("Too small internal buffer for string processing\n");
+			return false;
+		}
+		// Смещаем указатель файла к началу строки
+		LARGE_INTEGER offset;
+		offset.QuadPart = (LONGLONG)lineStartPos - bufferEnd;
+		fileBytesReaded.QuadPart += offset.QuadPart;
+		SetFilePointerEx(fileHandle, offset, NULL, FILE_CURRENT);
+	}
 	return false;
 }
 
-void CLogReader::fillInputBuffer(int lineStart, char* _buf, const int _bufsize, bool fileLastPart)
+// Запишем найденную строку во входной буффер
+void CLogReader::fillInputBuffer(DWORD lineStart, char* _buf, const int _bufsize)
 {
-	int currentLength = strnlen_s(_buf, _bufsize);
-	int freeSpace = _bufsize - currentLength - 1;
-
-	if (freeSpace > 0) {
-		int lineLenght = bufferPos - lineStart;
-		int toCopy = (freeSpace < lineLenght) ? freeSpace : lineLenght;
-		memcpy_s(&_buf[currentLength], freeSpace, &buffer[lineStart], toCopy);
-		// окончание строки
-		_buf[currentLength + toCopy] = NULL;
-	}
+	ZeroMemory(_buf, _bufsize);
+	memcpy_s(_buf, _bufsize, &buffer[lineStart], bufferPos - lineStart);
 }

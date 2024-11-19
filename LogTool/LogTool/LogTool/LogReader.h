@@ -16,13 +16,11 @@ public:
     // buf - буфер, bufsize - максимальная длина, false - конец файла или ошибка
 
 private:
-    HANDLE fileHandle;  // хэндл к файлу
-    LARGE_INTEGER fileSize;     // размер файла
+    HANDLE fileHandle;             // хэндл к файлу
+    LARGE_INTEGER fileSize;        // размер файла
     LARGE_INTEGER fileBytesReaded; // общее кол-во прочитанных байт
 
     char* filter;       // строка фильтра
-    size_t filterPos;      // позиция фильтра при проходе по строке
-    size_t filterAsteriskPos; // позиция звездочки в фильтре
 
     char* buffer;       // буфер для чтения из файла
     DWORD bufferSize;   // размер буфера
@@ -31,6 +29,6 @@ private:
 
     void releaseFilter();
     bool workWithReadedPart(char* _buf, const int _bufsize, bool fileLastPart);
-    void fillInputBuffer(int lineStart, char* _buf, const int _bufsize, bool fileLastPart);
+    void fillInputBuffer(DWORD lineStart, char* _buf, const int _bufsize);
 };
  

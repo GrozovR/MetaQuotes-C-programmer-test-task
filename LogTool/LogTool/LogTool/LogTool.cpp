@@ -28,6 +28,7 @@ int main( int argc, char* argv[] )
     while (logReader.GetNextLine(buf, bufsize)) {
         printf_s("%s\n", buf);
     }
+
     free(buf);
     logReader.Close();
     return 0;
