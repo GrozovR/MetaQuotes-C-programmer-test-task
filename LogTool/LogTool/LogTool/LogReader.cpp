@@ -219,13 +219,14 @@ bool CLogReader::workWithReadedPart(char* _buf, const int _bufsize, bool fileLas
 		fillInputBuffer(lineStartPos, _buf, _bufsize);
 		return true;
 	}
+
 	if (!fileLastPart && buffer[bufferPos - 1] != '\n') {
+		// Смещаем указатель файла к началу строки
 		if (lineStartPos == 0) {
 			bufferEnd = 0;
 			printf_s("Too small internal buffer for string processing\n");
 			return false;
 		}
-		// Смещаем указатель файла к началу строки
 		LARGE_INTEGER offset;
 		offset.QuadPart = (LONGLONG)lineStartPos - bufferEnd;
 		fileBytesReaded.QuadPart += offset.QuadPart;
