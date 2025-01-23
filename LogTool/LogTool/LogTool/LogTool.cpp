@@ -24,6 +24,10 @@ int main( int argc, char* argv[] )
 
     const int bufsize = 4096;
     char* buf = (char*) malloc(bufsize * sizeof(char));
+    if (buf == nullptr) {
+        printf_s("Cant allocate memory for output buffer");
+        return ErrorCode;
+    }
 
     while (logReader.GetNextLine(buf, bufsize)) {
         printf_s("%s\n", buf);
